@@ -1,4 +1,4 @@
-# DATA
+# DATA \\
 
 ------------------------- "/LED coherence/" ----------------------------
 In this folder you find the data related with the depolarization of the LED source used throught a variable LC retarder. Each file named from 0.csv - 4000nm.csv contains 100 measurents of the emergent light polarization state, their stokes parameters and degree of polarization. The main interest with this data is to extract the degree of polarization in order to measure the LED coherence function.
