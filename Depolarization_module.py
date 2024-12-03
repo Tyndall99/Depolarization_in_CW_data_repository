@@ -17,7 +17,13 @@ plt.rcParams.update({
 
 
 class Coherence:
+    """
+    This class creates a complex degree of coherence function associated with a light source
+    You can use the Gaussian, Lorentz, GaussLorentz or Blackbody coherence functions to modelate 
+    a partially coherente light source 
+    """
 
+    #define the type of coherences in the class
     coherences = ['Gaussian', 'Lorentzian', 'GaussLorentz', 'BlackBody']
 
     def gaussian(OptPathDiff, coh_length, wavelength = 0.633):
@@ -30,7 +36,8 @@ class Coherence:
     
     def gauss_lorentz(OptPathDiff, coh_length, wavelength = 0.633):
         coh_lenght_G, coh_lenght_L = coh_length
-        func = np.exp(-(np.pi/2)*(OptPathDiff/coh_lenght_G)**2 -np.abs(OptPathDiff)/coh_lenght_L - (2j*OptPathDiff*np.pi/wavelength))
+        func = np.exp(-(np.pi/2)*(OptPathDiff/coh_lenght_G)**2 -np.abs(OptPathDiff)/coh_lenght_L 
+                      - (2j*OptPathDiff*np.pi/wavelength))
         return func
     
     def blackbody(OptPathDiff, wavelength):
@@ -67,7 +74,7 @@ class Coherence:
         elif self.coherence_func == 'BlackBody':
             self._coherence = Coherence.blackbody(OptPathDiff, self.wavelength)
             return self._coherence
-        
+    
 class State(spy.Matrix):
 
     def pauli_matrices():
@@ -98,11 +105,14 @@ class State(spy.Matrix):
         
         alpha = np.deg2rad(alpha_0)
         chi = np.deg2rad(chi_0)
+        
+        #elements of the transformation matrix
         T11 = np.cos(alpha)*np.cos(chi) - 1j*np.sin(alpha)*np.sin(chi)
         T12 = np.cos(alpha)*np.sin(chi) + 1j*np.sin(alpha)*np.cos(chi)
         T21 = np.sin(alpha)*np.cos(chi) + 1j*np.cos(alpha)*np.sin(chi)
         T22 = np.sin(alpha)*np.sin(chi) - 1j*np.cos(alpha)*np.cos(chi)
 
+        #we create the transformation matrix
         matrix = spy.Matrix([[T11, T12],
                            [T21, T22]])
 
@@ -112,16 +122,22 @@ class State(spy.Matrix):
         cls.alpha = np.deg2rad(alpha)
         cls.chi = np.deg2rad(chi)
         cls.basis = basis
+        
+        #we create the basis transformation given the input basis
         cls.Matrix_Basis_Change = State.basis_change(basis[0], basis[1])
+        
+        #we create the state as a jones vector in the predefined basis (linear)
         cls._state = spy.Matrix([
                             np.cos(cls.alpha)*np.cos(cls.chi) - 1j*np.sin(cls.alpha)*np.sin(cls.chi),
                             np.sin(cls.alpha)*np.cos(cls.chi) + 1j*np.cos(cls.alpha)*np.sin(cls.chi)
                             ])
         
+        #condition for the predefined basis (linear basis)
         if basis == (0, 0) or basis == [0, 0]:
             cls.E1 = spy.N(spy.nsimplify(spy.simplify(cls._state[0]), rational=True, tolerance=1e-3), 4)
             cls.E2 = spy.N(spy.nsimplify(spy.simplify(cls._state[1]), rational=True, tolerance=1e-3), 4) 
-        
+
+            #the simplified polarization matrix is retuned
             return super(State, cls).__new__(cls, [
                 [spy.nsimplify(spy.simplify(cls.E1*np.conjugate(cls.E1)), rational=True, tolerance=1e-3),
                 spy.nsimplify(spy.simplify(cls.E1*np.conjugate(cls.E2)), rational=True, tolerance=1e-3)],
@@ -129,11 +145,13 @@ class State(spy.Matrix):
                 spy.nsimplify(spy.simplify(cls.E2*np.conjugate(cls.E2)), rational=True, tolerance=1e-3)]
                 ])
         
+        #condition for an arbitrary basis
         else:
             cls.state = cls.Matrix_Basis_Change.inv() * cls._state
             cls.E1 = spy.N(spy.nsimplify(spy.simplify(cls.state[0]), rational=True, tolerance=1e-3), 4)
             cls.E2 = spy.N(spy.nsimplify(spy.simplify(cls.state[1]), rational=True, tolerance=1e-3), 4) 
         
+            #the simplified polarization matrix is retuned
             return super(State, cls).__new__(cls, [
                 [spy.nsimplify(spy.simplify(cls.E1*np.conjugate(cls.E1)), rational=True, tolerance=1e-3),
                 spy.nsimplify(spy.simplify(cls.E1*np.conjugate(cls.E2)), rational=True, tolerance=1e-3)],
@@ -149,14 +167,18 @@ class State(spy.Matrix):
         self.Matrix_Basis_Change = State.basis_change(basis[0], basis[1])
 
     @property
+    def jones(cls):
+        return spy.Matrix([[cls.E1], [cls. E2]])
+    
+    @property
     def stokes(cls):
-        if cls.basis == (0, 0) or cls.basis == [0, 0]:
-            pauli_vector = State.pauli_matrices()
-        else: 
-            pauli_vector = cls.Matrix_Basis_Change.inv() * State.pauli_matrices() * cls.Matrix_Basis_Change
-
-        Stokes = [float(spy.N(spy.nsimplify(spy.trace(sigma*cls), tolerance = 1e-3), 3)) for sigma in pauli_vector]
+        X = spy.kronecker_product(cls.jones, cls.jones.conjugate())
+        Stokes = stokes_transformation() * X
         return Stokes 
+    
+    @property
+    def s0(cls):
+        return cls.stokes[0]
     
     @property
     def s1(cls):
@@ -211,18 +233,27 @@ class State(spy.Matrix):
         Graphic([cls])
     
     def operate(cls, operators, coherence):
+        #we simplify the operators in term of sines and cosines
         transformed_states = [spy.expand(operator * cls * operator.adjoint()).rewrite(spy.cos).expand() for operator in operators]
         operated_state = []
         for operator, state in zip(operators, transformed_states):
+            
+            #we create a list of OPD and all their possible combinations and a list of their respectives sines and cosines
             list_of_OPD, list_of_sines, list_of_cosines = operator.list_of_phases()
+            
+            #we replace each cosine and sine for the real and imaginaty part of the coherence function evaluated in all the OPD list
             for OPD, sine, cosine in zip(list_of_OPD, list_of_sines, list_of_cosines):
                 state = state.subs(sine, np.imag(coherence.eval(OPD)))
-                state = state.subs(cosine, np.real(coherence.eval(OPD)))
+                state = state.subs(cosine, np.real(coherence.eval(-OPD)))
+            
             J11 = state[0]
             J12 = state[1]
             J21 = state[2]
             J22 = state[3]
+            
+            #we add partially polarized states to the list of transformed states
             operated_state.append(Partial_State(J11, J12, J21, J22))
+        
         return operated_state
 
 class Partial_State(spy.Matrix):
@@ -242,7 +273,7 @@ class Partial_State(spy.Matrix):
         
     @property
     def dop(cls):
-        return np.real(spy.sqrt(1-4*(cls.det()/cls.trace()**2)))
+        return float(spy.sqrt(1-4*cls.det()))
     
     @property
     def stokes(cls):
@@ -283,33 +314,36 @@ class Rotation(spy.Matrix):
             return spy.nsimplify(spy.simplify(cls.rotation_matrix), tolerance=0.001)
     
 class Waveplate(spy.Matrix):
-
+    """
+    The waveplate class create the operator in Jones matrices associated with a waveplate with a given Optical Path difference
+    OPD, a given orientation angle, given eigenstates in an arbitrary basis.
+    """
+    
     def __new__(cls, OptPathDiff, angle = 0, eigenstate = (0,0), basis = (0,0)):
         
         cls.OptPathDiff = OptPathDiff
         cls.angle = np.deg2rad(angle)
         cls.basis = basis
-    
-        cls.operator = spy.exp(spy.I*cls.OptPathDiff)
+        
+        cls.x = spy.symbols('2\pi/\lambda', real=True)
+        
+        #We create the diagonalized matrix associated with the retarder, i.e. in the eigenstates basis
         cls._retarder = spy.Matrix([
-                                [cls.operator, 0],
+                                [spy.exp(cls.x*spy.I*cls.OptPathDiff), 0],
                                 [0, 1]
                                    ])
         
-        #if the basis is linear
+        #condition for the predefined basis (linear basis)
         if basis == (0,0) or basis == [0,0]:
-            #change of base matrix from eigenstate to linear
+            
+            #transformation base matrix from eigenstate to linear basis
             cls.change_basis_eigenstate = State.basis_change(eigenstate[0], eigenstate[1])
 
             #from eigenstate basis to selected basis
             cls.retarder = cls.change_basis_eigenstate * cls._retarder * cls.change_basis_eigenstate.inv() 
             cls.retarder = Rotation(angle).inv() * cls.retarder * Rotation(angle)
-            cls.retarder = spy.nsimplify(spy.simplify(cls.retarder), rational= True, tolerance= 1e-3)
 
-            return super(Waveplate, cls).__new__(cls, [
-            [cls.retarder[0], cls.retarder[1]],
-            [cls.retarder[2], cls.retarder[3]]
-            ])
+            return super(Waveplate, cls).__new__(cls, cls.retarder)
         
         #if the basis is another
         else:
@@ -321,22 +355,43 @@ class Waveplate(spy.Matrix):
             cls.retarder = cls.change_basis_eigenstate * cls._retarder * cls.change_basis_eigenstate.inv()
             cls.retarder = cls.matrix_basis_change.inv() * cls.retarder * cls.change_basis_eigenstate
             cls.retarder = Rotation(angle, basis).inv() * cls.retarder * Rotation(angle, basis)
-            cls.retarder = spy.nsimplify(spy.simplify(cls.retarder), rational= True, tolerance= 1e-3)
+            cls.retarder = spy.nsimplify(spy.simplify(cls.retarder), rational= True)
 
-            return super(Waveplate, cls).__new__(cls, [
-                [cls.retarder[0], cls.retarder[1]],
-                [cls.retarder[2], cls.retarder[3]]
-                ])
+            return super(Waveplate, cls).__new__(cls, cls.retarder)
         
     def __init__(self, OptPathDiff, angle = 0, eigenstate = (0,0), basis = (0,0)):
         self.OptPathDiff = OptPathDiff
         self.angle = np.deg2rad(angle)
         self.basis = basis
-        self.eigenstate = eigenstate 
+        self.eigenstate = eigenstate
+        self.x = spy.symbols('2\pi/\lambda', real=True) 
+    
+    @property
+    def stokes(cls):
+        matrix = stokes_transformation() * spy.kronecker_product(cls, cls.conjugate()) * stokes_transformation().inv()
+        return spy.simplify(matrix)
     
     def rotate(self, angle):
         return Waveplate(self.OptPathDiff, np.rad2deg(self.angle) + angle, self.eigenstate, self.basis)
-        
+    
+    def list_of_phases(self):
+        list_of_sines = spy.sin(self.x * self.OptPathDiff)
+        list_of_cosines = spy.cos(self.x * self.OptPathDiff)
+        return self.OptPathDiff, list_of_sines, list_of_cosines
+
+    def operate(cls, states, coherence):
+        transformed_states = [spy.expand(cls* state * cls.adjoint()).rewrite(spy.cos).expand() for state in states]
+        OPD, sine, cosine = cls.list_of_phases()
+        operated_state = []
+        for state in transformed_states:
+            state = state.subs(sine, np.imag(coherence.eval(OPD)))
+            state = state.subs(cosine, np.real(coherence.eval(OPD)))
+            J11 = state[0]
+            J12 = state[1]
+            J21 = state[2]
+            J22 = state[3]
+            operated_state.append(Partial_State(J11, J12, J21, J22))
+        return operated_state
         
 class Composite_waveplate(spy.Matrix):
     
@@ -350,20 +405,26 @@ class Composite_waveplate(spy.Matrix):
                 s.append(-s[t] + nums[i]) # substract this element with previous subsets
         del s[0]
         
-        return sorted(list(set(np.abs(s))))
+        return sorted(list(set(np.abs(s))))[1:]
     
     def __new__(cls, Waveplates):
         cls.waveplates = Waveplates
         cls.operator = spy.expand(spy.prod(cls.waveplates[::-1]))
-        return super(Composite_waveplate, cls).__new__(cls, [
-            [cls.operator[0], cls.operator[1]],
-            [cls.operator[2], cls.operator[3]]
-            ])
+        return super(Composite_waveplate, cls).__new__(cls, cls.operator)
     
     def __init__(self, Waveplates):
         self.waveplates = Waveplates
         super().__init__()
-        
+
+    @property
+    def stokes(cls):
+        if spy.shape(cls) == (4,4):
+            matrix = stokes_transformation() * cls * stokes_transformation().inv()
+            return spy.simplify(matrix)
+        else:
+            matrix = stokes_transformation() * spy.kronecker_product(cls, cls.conjugate()) * stokes_transformation().inv()
+            return spy.simplify(matrix)
+    
     def rotate(self, angle):
         list_of_wp = [wp.rotate(angle) for wp in self.waveplates]
         return Composite_waveplate(list_of_wp)
@@ -371,8 +432,8 @@ class Composite_waveplate(spy.Matrix):
     def list_of_phases(self):
         OptPathDiff_list = [wp.OptPathDiff for wp in self.waveplates]  
         list_of_OPD = Composite_waveplate._subsetSums(OptPathDiff_list)
-        list_of_sines = [spy.sin(OPD) for OPD in list_of_OPD]
-        list_of_cosines = [spy.cos(OPD) for OPD in list_of_OPD]
+        list_of_sines = [spy.sin( self.waveplates[0].x * OPD ) for OPD in list_of_OPD]
+        list_of_cosines = [spy.cos( self.waveplates[0].x * OPD ) for OPD in list_of_OPD]
         return list_of_OPD, list_of_sines, list_of_cosines
 
     def operate(cls, states, coherence):
@@ -382,13 +443,51 @@ class Composite_waveplate(spy.Matrix):
         for state in transformed_states:
             for OPD, sine, cosine in zip(list_of_OPD, list_of_sines, list_of_cosines):
                 state = state.subs(sine, np.imag(coherence.eval(OPD)))
-                state = state.subs(cosine, np.real(coherence.eval(OPD)))
+                state = state.subs(cosine, np.real(coherence.eval(-OPD)))
             J11 = state[0]
             J12 = state[1]
             J21 = state[2]
             J22 = state[3]
             operated_state.append(Partial_State(J11, J12, J21, J22))
         return operated_state
+
+class Polarimeter_data:
+
+    def read_data(path):
+        """
+        This function reads the polarimeter data from a folder and returns all the files readed
+        
+        """
+        #Read all the .csv files from path
+        all_files = glob.glob(path + '*.csv') 
+        
+        #Order all the data as in windows
+        all_files.sort(key=lambda x:[int(c) if c.isdigit() else c for c in re.split(r'(\d+)',
+                                                    x)]) 
+
+        return all_files
+
+    def __init__(self, path):
+        self.path = path
+        self.all_files = Polarimeter_data.read_data(path)
+            
+    def mean(self):
+        data = np.array([pd.read_csv(file, engine='python', #to read haders between quotation marks like "Header"
+                              index_col=False, header = 23, #The first data column is not longer use as colum index
+                                          usecols = [1,2,3,4,5,8], 
+                                          encoding='latin1').mean(axis=None) 
+                                          for file in self.all_files])
+        
+        return data
+    
+    def std(self):
+        data = np.array([pd.read_csv(file, engine='python', #to read haders between quotation marks like "Header"
+                              index_col=False, header = 23, #The first data column is not longer use as colum index
+                                          usecols = [1,2,3,4,5,8], 
+                                          encoding='latin1').std(axis=None) 
+                                          for file in self.all_files])
+        
+        return data
 
 def Graphic(State: list):
     u, v = np.mgrid[0:2*np.pi:30j, 0:np.pi:30j]
@@ -421,9 +520,9 @@ def Graphic(State: list):
     ax.plot(yy, zz, xx, color='gray', linewidth=1.5, alpha = 1)
 
     # Graphic the Data on the Sphere
-    s1 = [np.real(state.s1 / state.dop) for state in State]
-    s2 = [np.real(state.s2 / state.dop) for state in State]
-    s3 = [np.real(state.s3 / state.dop) for state in State]
+    s1 = [state.s1 / state.dop for state in State]
+    s2 = [state.s2 / state.dop for state in State]
+    s3 = [state.s3 / state.dop for state in State]
 
     ax.scatter(s1, s2, s3, color='red', alpha = 1, s=30)
 
@@ -444,39 +543,14 @@ def Graphic(State: list):
         
     plt.show()
 
-class Polarimeter_data:
-    def read_data(path):
-        """
-        This function reads the polarimeter data from a folder and returns all the files readed
-        
-        """
-        #Read all the .csv files from path
-        all_files = glob.glob(path + '*.csv') 
-        
-        #Order all the data as in windows
-        all_files.sort(key=lambda x:[int(c) if c.isdigit() else c for c in re.split(r'(\d+)',
-                                                    x)]) 
+def stokes_transformation():
+        matrix = spy.Matrix([
+            [1, 0, 0, 1],
+            [1, 0, 0, -1],
+            [0, 1, 1, 0],
+            [0, 1j, -1j, 0]
+        ])
 
-        return all_files
+        return matrix
 
-    def __init__(self, path):
-        self.path = path
-        self.all_files = Polarimeter_data.read_data(path)
-            
-        
-    def mean(self):
-        data = np.array([pd.read_csv(file, engine='python', #to read haders between quotation marks like "Header"
-                              index_col=False, header = 23, #The first data column is not longer use as colum index
-                                          usecols = [1,2,3,4,5,8], 
-                                          encoding='latin1').mean(axis=None) 
-                                          for file in self.all_files])
-        return data
-    
-    def std(self):
-        data = np.array([pd.read_csv(file, engine='python', #to read haders between quotation marks like "Header"
-                              index_col=False, header = 23, #The first data column is not longer use as colum index
-                                          usecols = [1,2,3,4,5,8], 
-                                          encoding='latin1').std(axis=None) 
-                                          for file in self.all_files])
-        return data
 
